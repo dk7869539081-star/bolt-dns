@@ -3,9 +3,9 @@ package main
 import (
 	"fmt"
 	"net"
-	"strings"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 )
 
@@ -29,7 +29,7 @@ func main() {
 		Port: 53,
 		IP:   net.ParseIP("127.0.0.1"),
 	}
-	
+
 	conn, err := net.ListenUDP("udp", &addr)
 	if err != nil {
 		fmt.Printf("❌ ERROR: Port 53 bind nahi ho saka. \n💡 Tip: Run as Admin/Sudo ya Port change karo.\nDetails: %v\n", err)
@@ -41,6 +41,13 @@ func main() {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
+	// Goroutine to handle shutdown: closing conn will cause ReadFromUDP to return an error
+	go func() {
+		<-sigChan
+		fmt.Println("\n🔌 Shutting down...")
+		conn.Close()
+	}()
+
 	fmt.Println("🛡️  SHIELD-CLI STARTED SUCCESSFULLY")
 	fmt.Println("📍 Listening on 127.0.0.1:53")
 	fmt.Println("-------------------------------------------")
@@ -51,14 +58,19 @@ func main() {
 	for {
 		n, remoteAddr, err := conn.ReadFromUDP(buffer)
 		if err != nil {
+			// If connection closed due to shutdown, break the loop and exit
+			if strings.Contains(err.Error(), "use of closed network connection") || strings.Contains(err.Error(), "closed network") {
+				break
+			}
+			// otherwise keep listening
 			continue
 		}
 
 		totalQueries++
-		queryData := string(buffer[:n])
+		queryData := strings.ToLower(string(buffer[:n]))
 		isBlocked := false
 
-		// Check if any blacklisted domain is in the query
+		// Check if any blacklisted domain is in the query (case-insensitive)
 		for domain := range blacklist {
 			if strings.Contains(queryData, domain) {
 				isBlocked = true
@@ -76,6 +88,10 @@ func main() {
 		// LIVE DASHBOARD PRINT
 		showStats()
 	}
+
+	// Final stats before exit
+	fmt.Println("🔚 Exiting. Final stats:")
+	showStats()
 }
 
 func showStats() {
